@@ -1,0 +1,13 @@
+second_sl <- read_dta("8_soft-launch/6_build/second_sl/second_sl_filtered.dta")
+second_to_reshape <- second_sl |> 
+  right_join(mutate(select(rec_to_reshape,student_code),
+                    student_code = as.numeric(student_code)),by = "student_code")
+
+second_to_reshape <- select(second_to_reshape,district:p6_kin_q10_sub4) |>
+  select(-starts_with("start_"))
+
+second_reshaped<-second_to_reshape|>
+  pivot_longer(cols=p1_eng_q01_sub1:p6_kin_q10_sub4,names_to = "Question",values_to = "Answer",
+               values_drop_na = TRUE)
+
+write_dta(second_reshaped,"3_clean/second_entry/second_reshaped.dta")
