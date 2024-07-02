@@ -1,0 +1,112 @@
+rm(list = ls())
+
+# libraries 
+library(tidyverse)
+library(openxlsx)
+library(haven)
+library(foreign)
+library(data.table)
+library(patchwork)
+library(cowplot)
+library(gridExtra)
+# Box Path
+
+if (Sys.getenv("USERNAME") == "HP" && Sys.getenv("COMPUTERNAME") == "RW-5CG2404KFQ") {
+  box_root <- file.path("C:","Users","HP", "Box", "IPA_RWA_Project_STARS")
+  
+} else {
+  stop("Define machine-specific Box Path.")
+}
+
+box_la_path <- file.path(box_root, "07_Data", "22_FinalAssessmentsIPA",
+                         "year_2","7_tracking")
+setwd(box_la_path)
+
+# Import data
+
+la_main <- read_dta("3_clean/la_main_data_0613.dta")
+setDT(la_main)
+la_main_exam <- la_main[exam_yn == 1,]
+
+la_reserve <- read_dta("3_clean/la_reserve_data_0613.dta")
+setDT(la_reserve)
+
+la_discr <- read_dta("3_clean/la_discr_data_0613.dta")
+setDT(la_discr)
+
+la_main_filt <- la_main_exam[,.(district,sector,school_code,school_name,grade,student_name,student_id)]
+la_main_filt[,status:="Main"]
+la_reserve_filt <- la_reserve[,.(district,sector,school_code,school_name,grade,student_name,student_id)]
+la_reserve_filt[,status:="Reserve"]
+la_discr_filt <- la_discr[,.(district,sector,school_code,school_name,grade,student_name,student_id)]
+la_discr_filt[,status:="Discretionary"]
+
+la_students <- rbind(la_main_filt, la_reserve_filt, la_discr_filt)
+nrow(count(la_students,school_code))
+# adding an update regarding a student that wasn't entered:
+# 
+
+fwrite(la_students,"3_clean/students/students_list.csv")
+
+# check for missing grades at schools
+grade_filt <- unique(la_students[,.(district,sector,school_code,school_name,grade)])
+all_schools <- la_students[grade == "P1",.(district,sector,school_code,school_name)]
+all_schools <- unique(all_schools)
+grades <- paste0("P",1:6)
+grades <- rep(grades,489)
+all_schools_rep <- do.call("rbind", replicate( 
+  6, all_schools, simplify = FALSE)) 
+setDT(all_schools_rep)
+setorder(all_schools_rep,school_code)
+all_schools_rep[, grade := grades]
+
+#join the datasets to check missing grades
+grade_filt[,status := "Sent"]
+all_schools_rep[grade_filt, on = c("district","sector","school_code","school_name","grade"), status:=i.status]
+view(all_schools_rep[is.na(status),])
+
+
+# Visualization
+viz_data <- la_students[, .(count = .N), by = status]
+viz_data[,perc_count := count * 100/sum(count)]
+setorder(viz_data,perc_count)
+scale_factor = 1
+ggplot(la_students,aes(x = forcats::fct_infreq(status))) +
+  geom_bar()+
+  scale_y_continuous(limits=c(0,80000), expand = c(0, 0))+
+  geom_text(
+    aes(label = after_stat(round(count/sum(count),2))),
+    stat = "count",
+    vjust = 1.1,
+    size = scale_factor * 4,
+    colour = "white",
+    fontface = "bold"
+  )+
+  ggtitle(str_wrap("Students Selected Status", 
+                   width = scale_factor * 35)) +
+  theme(axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        axis.text.y = element_blank(),
+        axis.text.x = element_text(face = "bold",size = scale_factor * 8),
+        plot.title=  element_text(size = scale_factor * 12,hjust = .5),
+        legend.position = "none", # Removes the legend
+        panel.background = element_rect(fill = "white")) 
+
+ggsave("4_report/students_status.png", scale = scale_factor, width = 15, height = 15, units = "cm")
+
+  
+
+
+kei <- la_students[, dupy := .N > 1, by = student_id]
+#unike <- la_students[unique(la_students, by = student_id),dupy:=.N>1] 
+#dup <- la_students[,dupy := duplicated.data.frame(.SD)|duplicated.data.frame(.SD, fromLast=TRUE),
+           #.SDcols = student_id]
+kei0 <- kei[!(dupy == TRUE & status == "Discretionary")]
+view(kei0[dupy==TRUE])
+kei_cl <- kei0[,dupy:=NULL]
+kei_cl_0 <- kei_cl[, dupy := .N > 1, by = student_id]
+view(kei_cl_0[dupy==TRUE])#no duplicates
+fwrite(kei_cl,"3_clean/students/students_list.csv")
+
+# appending students not on the list 
+
